@@ -54,8 +54,8 @@ func NewInitializeResponse(id int) InitializeResponse {
 				CompletionProvider: map[string]any{},
 			},
 			ServerInfo: ServerInfo{
-				Name:    "educationalsp",
-				Version: "0.0.0.0.0.0-beta1.final",
+				Name:    "norminette-lsp",
+				Version: "0.0.0.1-xd",
 			},
 		},
 	}

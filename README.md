@@ -1,7 +1,13 @@
-# `educationalsp`
+# `norminette-lsp`
 
 A Language Server built for the educational purpose of understanding **WHAT** LSP is and **HOW** it works.
 
-It doesn't do anything special for any particular language, it is focused on helping you understand what your tools **do**.
+I added a simple norminette linting functionality for C language files.
 
-This LSP was tested with Neovim, but would likely work inside Neovim.
+This LSP was tested with Neovim.
+
+### `build`
+
+```bash
+   go build 
+```

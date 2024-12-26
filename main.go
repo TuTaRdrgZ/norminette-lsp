@@ -2,17 +2,17 @@ package main
 
 import (
 	"bufio"
-	"educationalsp/analysis"
-	"educationalsp/lsp"
-	"educationalsp/rpc"
 	"encoding/json"
 	"io"
 	"log"
+	"norminette-lsp/analysis"
+	"norminette-lsp/lsp"
+	"norminette-lsp/rpc"
 	"os"
 )
 
 func main() {
-	logger := getLogger("/home/tjdevries/git/educationalsp/log.txt")
+	logger := getLogger("/home/tuta/tuta/coding/randomProjects/norminette-lsp/log.txt")
 	logger.Println("Hey, I started!")
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -60,7 +60,7 @@ func handleMessage(logger *log.Logger, writer io.Writer, state analysis.State, m
 		}
 
 		logger.Printf("Opened: %s", request.Params.TextDocument.URI)
-		diagnostics := state.OpenDocument(request.Params.TextDocument.URI, request.Params.TextDocument.Text)
+		diagnostics := state.OpenDocument(logger, request.Params.TextDocument.URI, request.Params.TextDocument.Text)
 		writeResponse(writer, lsp.PublishDiagnosticsNotification{
 			Notification: lsp.Notification{
 				RPC:    "2.0",
@@ -80,7 +80,7 @@ func handleMessage(logger *log.Logger, writer io.Writer, state analysis.State, m
 
 		logger.Printf("Changed: %s", request.Params.TextDocument.URI)
 		for _, change := range request.Params.ContentChanges {
-			diagnostics := state.UpdateDocument(request.Params.TextDocument.URI, change.Text)
+			diagnostics := state.UpdateDocument(logger, request.Params.TextDocument.URI, change.Text)
 			writeResponse(writer, lsp.PublishDiagnosticsNotification{
 				Notification: lsp.Notification{
 					RPC:    "2.0",
@@ -92,61 +92,31 @@ func handleMessage(logger *log.Logger, writer io.Writer, state analysis.State, m
 				},
 			})
 		}
-	case "textDocument/hover":
-		var request lsp.HoverRequest
+	case "textDocument/didSave":
+		var request lsp.DidOpenTextDocumentNotification
 		if err := json.Unmarshal(contents, &request); err != nil {
-			logger.Printf("textDocument/hover: %s", err)
+			logger.Printf("textDocument/didSave: %s", err)
 			return
 		}
 
-		// Create a response
-		response := state.Hover(request.ID, request.Params.TextDocument.URI, request.Params.Position)
-
-		// Write it back
-		writeResponse(writer, response)
-	case "textDocument/definition":
-		var request lsp.DefinitionRequest
-		if err := json.Unmarshal(contents, &request); err != nil {
-			logger.Printf("textDocument/definition: %s", err)
-			return
-		}
-
-		// Create a response
-		response := state.Definition(request.ID, request.Params.TextDocument.URI, request.Params.Position)
-
-		// Write it back
-		writeResponse(writer, response)
-	case "textDocument/codeAction":
-		var request lsp.CodeActionRequest
-		if err := json.Unmarshal(contents, &request); err != nil {
-			logger.Printf("textDocument/codeAction: %s", err)
-			return
-		}
-
-		// Create a response
-		response := state.TextDocumentCodeAction(request.ID, request.Params.TextDocument.URI)
-
-		// Write it back
-		writeResponse(writer, response)
-	case "textDocument/completion":
-		var request lsp.CompletionRequest
-		if err := json.Unmarshal(contents, &request); err != nil {
-			logger.Printf("textDocument/codeAction: %s", err)
-			return
-		}
-
-		// Create a response
-		response := state.TextDocumentCompletion(request.ID, request.Params.TextDocument.URI)
-
-		// Write it back
-		writeResponse(writer, response)
+		logger.Printf("Save: %s", request.Params.TextDocument.URI)
+		diagnostics := state.SaveDocument(logger, request.Params.TextDocument.URI, request.Params.TextDocument.Text)
+		writeResponse(writer, lsp.PublishDiagnosticsNotification{
+			Notification: lsp.Notification{
+				RPC:    "2.0",
+				Method: "textDocument/publishDiagnostics",
+			},
+			Params: lsp.PublishDiagnosticsParams{
+				URI:         request.Params.TextDocument.URI,
+				Diagnostics: diagnostics,
+			},
+		})
 	}
 }
 
 func writeResponse(writer io.Writer, msg any) {
 	reply := rpc.EncodeMessage(msg)
 	writer.Write([]byte(reply))
-
 }
 
 func getLogger(filename string) *log.Logger {
@@ -155,5 +125,5 @@ func getLogger(filename string) *log.Logger {
 		panic("hey, you didnt give me a good file")
 	}
 
-	return log.New(logfile, "[educationalsp]", log.Ldate|log.Ltime|log.Lshortfile)
+	return log.New(logfile, "[norminette-lsp]", log.Ldate|log.Ltime|log.Lshortfile)
 }

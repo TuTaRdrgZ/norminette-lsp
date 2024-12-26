@@ -1,7 +1,7 @@
 package rpc_test
 
 import (
-	"educationalsp/rpc"
+	"norminette-lsp/rpc"
 	"testing"
 )
 
@@ -33,4 +33,3 @@ func TestDecode(t *testing.T) {
 		t.Fatalf("Expected: 'hi', Got: %s", method)
 	}
 }
-

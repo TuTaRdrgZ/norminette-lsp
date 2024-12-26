@@ -1,8 +1,11 @@
 package analysis
 
 import (
-	"educationalsp/lsp"
 	"fmt"
+	"log"
+	"norminette-lsp/lsp"
+	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -15,153 +18,96 @@ func NewState() State {
 	return State{Documents: map[string]string{}}
 }
 
-func getDiagnosticsForFile(text string) []lsp.Diagnostic {
-	diagnostics := []lsp.Diagnostic{}
-	for row, line := range strings.Split(text, "\n") {
-		if strings.Contains(line, "VS Code") {
-			idx := strings.Index(line, "VS Code")
-			diagnostics = append(diagnostics, lsp.Diagnostic{
-				Range:    LineRange(row, idx, idx+len("VS Code")),
-				Severity: 1,
-				Source:   "Common Sense",
-				Message:  "Please make sure we use good language in this video",
-			})
+// Execute norminette and parse its output
+func runNorminette(logger *log.Logger, filePath string, text string) ([]lsp.Diagnostic, error) {
+	// if we dont provide a text (non saved buffer data) we create a temp file with the text
+	// so we can run norminette on it
+	if text != "" {
+		tempFile, err := os.CreateTemp("/tmp/", "norminette-*.c")
+		logger.Println("NewStatefile:", tempFile.Name())
+		if err != nil {
+			return nil, err
 		}
+		defer os.Remove(tempFile.Name())
 
-		if strings.Contains(line, "Neovim") {
-			idx := strings.Index(line, "Neovim")
+		_, err = tempFile.WriteString(text)
+		if err != nil {
+			logger.Printf("Failed to write to temp file: %v", err)
+			return nil, err
+		}
+		tempFile.Close()
+		filePath = tempFile.Name()
+	}
+	logger.Println("Running norminette on", filePath)
+	fmt.Print("\033[H\033[2J") // ANSI escape code to clear the screen
+	cmd := exec.Command("norminette", filePath)
+	output, err := cmd.CombinedOutput()
+	if err != nil && cmd.ProcessState.ExitCode() != 0 {
+		// Norminette returns non-zero exit code for errors; this is not a fatal error.
+		// Just process the output.
+		fmt.Println("Norminette output:", string(output))
+	}
+
+	diagnostics := []lsp.Diagnostic{}
+	for _, line := range strings.Split(string(output), "\n") {
+		if strings.Contains(line, "Error") {
+			// Parse the line to extract error details
+			parts := strings.Split(line, ":")
+			if len(parts) < 3 {
+				continue
+			}
+
+			row, col := 0, 0
+			fmt.Sscanf(parts[2], "%d", &row)
+			fmt.Sscanf(parts[3], "%d", &col)
+			message := strings.Join(parts[4:], ":")
+			logger.Println("Norminette output line:", line)
+			logger.Println("Row:", row)
+			logger.Println("Col:", col)
+			logger.Println("Message:", message)
 			diagnostics = append(diagnostics, lsp.Diagnostic{
-				Range:    LineRange(row, idx, idx+len("Neovim")),
-				Severity: 2,
-				Source:   "Common Sense",
-				Message:  "Great choice :)",
+				Range:    LineRange(row-1, col-4, col-4),
+				Severity: 1, // Error severity
+				Source:   "norminette",
+				Message:  strings.TrimSpace(message),
 			})
-
 		}
 	}
 
+	return diagnostics, nil
+}
+
+func getDiagnosticsForFile(logger *log.Logger, filePath string, text string) []lsp.Diagnostic {
+	logger.Printf("text %s", text)
+	diagnostics, err := runNorminette(logger, filePath, text)
+	if err != nil {
+		fmt.Printf("Failed to run Norminette: %v\n", err)
+	}
 	return diagnostics
 }
 
-func (s *State) OpenDocument(uri, text string) []lsp.Diagnostic {
-	s.Documents[uri] = text
+func (s *State) OpenDocument(logger *log.Logger, uri, text string) []lsp.Diagnostic {
+	// s.Documents[uri] = text
+	filePath := strings.TrimPrefix(uri, "file://")
 
-	return getDiagnosticsForFile(text)
+	return getDiagnosticsForFile(logger, filePath, text)
 }
 
-func (s *State) UpdateDocument(uri, text string) []lsp.Diagnostic {
-	s.Documents[uri] = text
+func (s *State) SaveDocument(logger *log.Logger, uri, text string) []lsp.Diagnostic {
+	// s.Documents[uri] = text
+	logger.Println("s.Documents[uri]:", s.Documents)
+	filePath := strings.TrimPrefix(uri, "file://")
 
-	return getDiagnosticsForFile(text)
+	return getDiagnosticsForFile(logger, filePath, text)
 }
 
-func (s *State) Hover(id int, uri string, position lsp.Position) lsp.HoverResponse {
-	// In real life, this would look up the type in our type analysis code...
+func (s *State) UpdateDocument(logger *log.Logger, uri, text string) []lsp.Diagnostic {
+	// s.Documents[uri] = text
 
-	document := s.Documents[uri]
-
-	return lsp.HoverResponse{
-		Response: lsp.Response{
-			RPC: "2.0",
-			ID:  &id,
-		},
-		Result: lsp.HoverResult{
-			Contents: fmt.Sprintf("File: %s, Characters: %d", uri, len(document)),
-		},
-	}
+	return getDiagnosticsForFile(logger, "", text)
 }
 
-func (s *State) Definition(id int, uri string, position lsp.Position) lsp.DefinitionResponse {
-	// In real life, this would look up the definition
-
-	return lsp.DefinitionResponse{
-		Response: lsp.Response{
-			RPC: "2.0",
-			ID:  &id,
-		},
-		Result: lsp.Location{
-			URI: uri,
-			Range: lsp.Range{
-				Start: lsp.Position{
-					Line:      position.Line - 1,
-					Character: 0,
-				},
-				End: lsp.Position{
-					Line:      position.Line - 1,
-					Character: 0,
-				},
-			},
-		},
-	}
-}
-func (s *State) TextDocumentCodeAction(id int, uri string) lsp.TextDocumentCodeActionResponse {
-	text := s.Documents[uri]
-
-	actions := []lsp.CodeAction{}
-	for row, line := range strings.Split(text, "\n") {
-		idx := strings.Index(line, "VS Code")
-		if idx >= 0 {
-			replaceChange := map[string][]lsp.TextEdit{}
-			replaceChange[uri] = []lsp.TextEdit{
-				{
-					Range:   LineRange(row, idx, idx+len("VS Code")),
-					NewText: "Neovim",
-				},
-			}
-
-			actions = append(actions, lsp.CodeAction{
-				Title: "Replace VS C*de with a superior editor",
-				Edit:  &lsp.WorkspaceEdit{Changes: replaceChange},
-			})
-
-			censorChange := map[string][]lsp.TextEdit{}
-			censorChange[uri] = []lsp.TextEdit{
-				{
-					Range:   LineRange(row, idx, idx+len("VS Code")),
-					NewText: "VS C*de",
-				},
-			}
-
-			actions = append(actions, lsp.CodeAction{
-				Title: "Censor to VS C*de",
-				Edit:  &lsp.WorkspaceEdit{Changes: censorChange},
-			})
-		}
-	}
-
-	response := lsp.TextDocumentCodeActionResponse{
-		Response: lsp.Response{
-			RPC: "2.0",
-			ID:  &id,
-		},
-		Result: actions,
-	}
-
-	return response
-}
-
-func (s *State) TextDocumentCompletion(id int, uri string) lsp.CompletionResponse {
-
-	// Ask your static analysis tools to figure out good completions
-	items := []lsp.CompletionItem{
-		{
-			Label:         "Neovim (BTW)",
-			Detail:        "Very cool editor",
-			Documentation: "Fun to watch in videos. Don't forget to like & subscribe to streamers using it :)",
-		},
-	}
-
-	response := lsp.CompletionResponse{
-		Response: lsp.Response{
-			RPC: "2.0",
-			ID:  &id,
-		},
-		Result: items,
-	}
-
-	return response
-}
-
+// LineRange helper function
 func LineRange(line, start, end int) lsp.Range {
 	return lsp.Range{
 		Start: lsp.Position{
